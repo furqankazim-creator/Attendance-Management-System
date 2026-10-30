@@ -1,0 +1,36 @@
+{
+  "expo": {
+    "name": "Attendance",
+    "slug": "attendance-mobile",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "ios": {
+      "bundleIdentifier": "com.example.attendance",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "GeoWork reads your location when you tap Punch and, if you turn on automatic attendance, when you arrive at or leave your work area.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "GeoWork reads your location when you tap Punch and, if you turn on automatic attendance, when you arrive at or leave your work area."
+      }
+    },
+    "android": {
+      "package": "com.example.attendance",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION"
+      ]
+    },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "GeoWork reads your location when you tap Punch and, if you turn on automatic attendance, when you arrive at or leave your work area.",
+          "locationWhenInUsePermission": "GeoWork reads your location when you tap Punch and, if you turn on automatic attendance, when you arrive at or leave your work area.",
+          "isAndroidBackgroundLocationEnabled": true,
+          "isIosBackgroundLocationEnabled": true
+        }
+      ],
+      "expo-font",
+      "expo-dev-client"
+    ]
+  }
+}

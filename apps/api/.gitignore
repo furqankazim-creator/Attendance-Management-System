@@ -1,0 +1,4 @@
+.env
+attendance.db*
+.mongo-test
+.data
