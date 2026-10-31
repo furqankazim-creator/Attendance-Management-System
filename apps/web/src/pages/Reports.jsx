@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Download, Search, Users, CheckCircle2, Clock, Timer } from 'lucide-react';
-import { Avatar, Empty, Pill, StatCard, fmtHours, fmtTime, todayISO } from '../ui.jsx';
+import { Avatar, Empty, Pill, StatCard, fmtHours, fmtTime, todayISO, usePoll } from '../ui.jsx';
 import { BASE } from '../api.js';
 
 export function Reports({ api, token }) {
@@ -11,6 +11,7 @@ export function Reports({ api, token }) {
   const [q, setQ] = useState('');
   const query = `?from=${from}&to=${to}`;
   useEffect(() => { api.get(`/reports/attendance${query}`).then(setRows); }, [query]);
+  usePoll(() => api.get(`/reports/attendance${query}`).then(setRows), 30000, false);
   const shown = rows.filter((r) => r.worker.toLowerCase().includes(q.toLowerCase()));
   const sum = useMemo(() => ({
     present: shown.filter((r) => r.status === 'present').length, late: shown.filter((r) => r.status === 'late').length,
@@ -64,7 +65,7 @@ export function Reports({ api, token }) {
 export function Audit({ api }) {
   const [rows, setRows] = useState([]);
   const [q, setQ] = useState('');
-  useEffect(() => { api.get('/audit').then(setRows); }, []);
+  usePoll(() => api.get('/audit').then(setRows), 20000);
   const shown = rows.filter((a) => (a.action + a.detail).toLowerCase().includes(q.toLowerCase()));
   return (
     <>

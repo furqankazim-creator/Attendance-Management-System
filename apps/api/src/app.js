@@ -9,6 +9,7 @@ import { attendanceStatus } from './status.js';
 import { ROLES, STAFF_ROLES, can } from './roles.js';
 import { registerExtras } from './extras.js';
 import { registerExtras2 } from './extras2.js';
+import { makeDuty, registerDuty, dutySettings } from './duty.js';
 
 const dayKey = (ts, tz) => new Date(ts + tz * 60000).toISOString().slice(0, 10);
 const levelOf = (score) => (score >= 50 ? 'high' : score >= 20 ? 'medium' : 'low');
@@ -17,14 +18,24 @@ export async function buildApp({ mongoUri, dbName = 'geowork', secret = 'dev-sec
   const app = Fastify();
   const db = await openDb(mongoUri, dbName);
   app.addHook('onClose', async () => { await db.close(); });
-  app.register(cors, { origin: true });
-  app.register(jwt, { secret });
+  // CORS: set CORS_ORIGIN (comma separated admin-panel URLs) in production. Unset = open, for local development.
+  const origins = (process.env.CORS_ORIGIN ?? '').split(',').map((o) => o.trim()).filter(Boolean);
+  app.register(cors, { origin: origins.length ? origins : true });
+  app.register(jwt, { secret, sign: { expiresIn: process.env.TOKEN_TTL ?? '7d' } });
+
+  // Login throttle: 8 wrong passwords per email+IP in 15 minutes, then 429 until the window passes.
+  const fails = new Map();
+  const throttleKey = (req, email) => `${req.ip}|${String(email ?? '').toLowerCase()}`;
+  const locked = (k) => { const f = fails.get(k); return !!f && Date.now() - f.first < 15 * 60000 && f.n >= 8; };
+  const noteFail = (k) => { const f = fails.get(k); if (!f || Date.now() - f.first >= 15 * 60000) fails.set(k, { n: 1, first: Date.now() }); else f.n++; };
 
   const audit = (org_id, actor_id, action, detail) =>
     db.insert('audit', { org_id, actor_id, action, detail: JSON.stringify(detail ?? {}), ts: Date.now() });
   const tzOf = async (org_id) => (await db.one('orgs', { id: org_id })).tz_offset_min;
   const nameMap = async (org_id) => Object.fromEntries((await db.find('users', { org_id }, { projection: { id: 1, name: 1 } })).map((u) => [u.id, u.name]));
   const iso = (ts) => new Date(ts).toISOString();
+  const duty = makeDuty({ db, tzOf, dayKey });
+  app.decorate('runDuty', (now) => duty.run(now));
 
   const auth = async (req, reply) => {
     try { await req.jwtVerify(); } catch { return reply.code(401).send({ error: 'unauthorized' }); }
@@ -52,14 +63,17 @@ export async function buildApp({ mongoUri, dbName = 'geowork', secret = 'dev-sec
     if (!orgName || !name || !email || !password) return reply.code(400).send({ error: 'missing_fields' });
     if (await db.one('users', { email })) return reply.code(409).send({ error: 'email_taken' });
     const org_id = await db.insert('orgs', { name: orgName, tz_offset_min });
-    const id = await db.insert('users', newUser({ org_id, name, email, password_hash: bcrypt.hashSync(password, 8), role: 'owner' }));
+    const id = await db.insert('users', newUser({ org_id, name, email, password_hash: bcrypt.hashSync(password, 10), role: 'owner' }));
     return { token: app.jwt.sign({ id, org_id, role: 'owner' }) };
   });
 
   app.post('/auth/login', async (req, reply) => {
     const { email, password, device_id } = req.body ?? {};
+    const tk = throttleKey(req, email);
+    if (locked(tk)) return reply.code(429).send({ error: 'too_many_attempts' });
     const u = await db.one('users', { email: email ?? '' });
-    if (!u || !bcrypt.compareSync(password ?? '', u.password_hash)) return reply.code(401).send({ error: 'bad_credentials' });
+    if (!u || !bcrypt.compareSync(password ?? '', u.password_hash)) { noteFail(tk); return reply.code(401).send({ error: 'bad_credentials' }); }
+    fails.delete(tk);
     if (!u.active) return reply.code(403).send({ error: 'account_disabled' });
     if (u.role === 'worker' && device_id && !u.device_id) {
       await db.update('users', { id: u.id }, { device_id });
@@ -87,7 +101,9 @@ export async function buildApp({ mongoUri, dbName = 'geowork', secret = 'dev-sec
       return reply.code(400).send({ error: 'circle_needs_lat_lng_radius_min_50' });
     if (type === 'polygon' && !(Array.isArray(points) && points.length >= 3))
       return reply.code(400).send({ error: 'polygon_needs_3_points' });
-    const id = await db.insert('sites', { org_id: req.user.org_id, name, type, lat: lat ?? null, lng: lng ?? null, radius_m: radius_m ?? null, points: points ?? null, auto_attendance: req.body.auto_attendance === false ? 0 : 1 });
+    const ds = dutySettings(req.body);
+    if (!ds.ok) return reply.code(400).send({ error: ds.error });
+    const id = await db.insert('sites', { org_id: req.user.org_id, name, type, lat: lat ?? null, lng: lng ?? null, radius_m: radius_m ?? null, points: points ?? null, auto_attendance: req.body.auto_attendance === false ? 0 : 1, ...ds.set });
     await audit(req.user.org_id, req.user.id, 'site_created', { name, type });
     return { id };
   });
@@ -100,8 +116,8 @@ export async function buildApp({ mongoUri, dbName = 'geowork', secret = 'dev-sec
     if (await db.one('users', { email })) return reply.code(409).send({ error: 'email_taken' });
     const pin = String(Math.floor(Math.random() * 10000)).padStart(4, '0');
     const id = await db.insert('users', newUser({
-      org_id: req.user.org_id, name, email, password_hash: bcrypt.hashSync(password, 8), role: 'worker', site_id,
-      shift_start, shift_end, grace_min, department: department || 'General', pin_hash: bcrypt.hashSync(pin, 8),
+      org_id: req.user.org_id, name, email, password_hash: bcrypt.hashSync(password, 10), role: 'worker', site_id,
+      shift_start, shift_end, grace_min, department: department || 'General', pin_hash: bcrypt.hashSync(pin, 10),
     }));
     await audit(req.user.org_id, req.user.id, 'worker_created', { name, email });
     return { id, pin };
@@ -148,7 +164,9 @@ export async function buildApp({ mongoUri, dbName = 'geowork', secret = 'dev-sec
 
     const fence = checkFence(site, { lat: b.lat, lng: b.lng }, b.accuracy);
     const leavingAuto = auto && b.kind === 'out'; // leaving means being outside the fence, so only entering must be inside
-    if (!leavingAuto) {
+    // A manual check-out from outside (forgot to tap before leaving) is accepted but always goes to a supervisor for review.
+    const outsideOut = !auto && b.kind === 'out' && !fence.inside;
+    if (!leavingAuto && !outsideOut) {
       if (!fence.inside) {
         await audit(u.org_id, u.id, 'punch_rejected_outside', { distance_m: fence.distance_m });
         return reply.code(403).send({ error: 'outside_fence', distance_m: fence.distance_m });
@@ -164,6 +182,7 @@ export async function buildApp({ mongoUri, dbName = 'geowork', secret = 'dev-sec
       previous: prev, point: { lat: b.lat, lng: b.lng }, now: ts,
     });
     if (extra.length) { risk.score = Math.min(100, risk.score + 15); risk.reasons.push(...extra); risk.level = levelOf(risk.score); }
+    if (outsideOut) { risk.score = Math.min(100, risk.score + 50); risk.reasons.push('outside_area_checkout'); risk.level = levelOf(risk.score); }
     if (risk.reasons.includes('mock_location') && !offline) {
       await audit(u.org_id, u.id, 'punch_rejected_mock', {});
       return reply.code(403).send({ error: 'mock_location_detected' });
@@ -184,11 +203,14 @@ export async function buildApp({ mongoUri, dbName = 'geowork', secret = 'dev-sec
       ? attendanceStatus({ start: u.shift_start, grace_min: u.grace_min }, new Date(ts), tz) : null;
     const review = risk.level === 'high' ? 'pending' : 'auto';
 
+    // Left the work area while on duty: an automatic exit or an outside check-out before the shift ends.
+    const leftArea = b.kind === 'out' && (leavingAuto || outsideOut) && ts < duty.shiftEndAt(u, ts, tz);
     const id = await db.insert('punches', {
       org_id: u.org_id, user_id: u.id, site_id: site.id, kind: b.kind, server_ts: ts, device_ts: b.device_ts ?? null,
-      lat: b.lat, lng: b.lng, accuracy: b.accuracy ?? null, device_id: b.device_id ?? null, mock: b.mock ? 1 : 0, inside: 1,
-      risk_score: risk.score, risk_level: risk.level, risk_reasons: risk.reasons, status, offline, review, source: auto ? 'auto' : 'app',
+      lat: b.lat, lng: b.lng, accuracy: b.accuracy ?? null, device_id: b.device_id ?? null, mock: b.mock ? 1 : 0, inside: outsideOut ? 0 : 1,
+      risk_score: risk.score, risk_level: risk.level, risk_reasons: risk.reasons, status, offline, review, source: auto ? 'auto' : 'app', left_area: leftArea ? 1 : 0,
     });
+    await duty.onPunch({ u, site, tz, ts, kind: b.kind, leftArea, source: auto ? 'auto' : 'app', outside: outsideOut, prev: prevRow, punchId: id });
     return { id, kind: b.kind, status, risk, review, source: auto ? 'auto' : 'app', at: iso(ts) };
   });
 
@@ -293,7 +315,7 @@ export async function buildApp({ mongoUri, dbName = 'geowork', secret = 'dev-sec
     if (role === 'supervisor' && !site_id) return reply.code(400).send({ error: 'supervisor_needs_site' });
     if (site_id && !(await db.one('sites', { id: site_id, org_id: req.user.org_id }))) return reply.code(400).send({ error: 'bad_site' });
     if (await db.one('users', { email })) return reply.code(409).send({ error: 'email_taken' });
-    const id = await db.insert('users', newUser({ org_id: req.user.org_id, name, email, password_hash: bcrypt.hashSync(password, 8), role, site_id: role === 'supervisor' ? site_id : null }));
+    const id = await db.insert('users', newUser({ org_id: req.user.org_id, name, email, password_hash: bcrypt.hashSync(password, 10), role, site_id: role === 'supervisor' ? site_id : null }));
     await audit(req.user.org_id, req.user.id, 'staff_created', { name, email, role });
     return { id };
   });
@@ -316,7 +338,9 @@ export async function buildApp({ mongoUri, dbName = 'geowork', secret = 'dev-sec
     if (!s) return reply.code(404).send({ error: 'not_found' });
     const b = req.body ?? {};
     if (b.radius_m !== undefined && !(b.radius_m >= 50)) return reply.code(400).send({ error: 'radius_min_50' });
-    await db.update('sites', { id: s.id }, { name: b.name ?? s.name, lat: b.lat ?? s.lat, lng: b.lng ?? s.lng, radius_m: b.radius_m ?? s.radius_m, points: b.points ?? s.points, auto_attendance: 'auto_attendance' in b ? (b.auto_attendance ? 1 : 0) : (s.auto_attendance ?? 1) });
+    const ds = dutySettings(b);
+    if (!ds.ok) return reply.code(400).send({ error: ds.error });
+    await db.update('sites', { id: s.id }, { ...ds.set, name: b.name ?? s.name, lat: b.lat ?? s.lat, lng: b.lng ?? s.lng, radius_m: b.radius_m ?? s.radius_m, points: b.points ?? s.points, auto_attendance: 'auto_attendance' in b ? (b.auto_attendance ? 1 : 0) : (s.auto_attendance ?? 1) });
     await audit(req.user.org_id, req.user.id, 'site_updated', { id: s.id, ...b });
     return { ok: true };
   });
@@ -389,7 +413,7 @@ export async function buildApp({ mongoUri, dbName = 'geowork', secret = 'dev-sec
     const topLate = workers.map((w) => ({ name: w.name, late: lateBy[w.id] ?? 0 })).filter((w) => w.late).sort((a, b) => b.late - a.late).slice(0, 5);
     const risky = (await db.find('punches', { org_id: req.user.org_id, risk_level: { $ne: 'low' } }, { projection: { user_id: 1 } })).filter((p) => seen(vis, p.user_id)).length;
     const count = async (col, filter) => (await db.find(col, { org_id: req.user.org_id, ...filter }, { projection: { user_id: 1 } })).filter((r) => seen(vis, r.user_id)).length;
-    return { workers: workers.length, days, topLate, risky, pendingReview: await count('punches', { review: 'pending' }), pendingCorr: await count('corrections', { state: 'pending' }), pendingLeave: await count('leaves', { state: 'pending' }) };
+    return { workers: workers.length, days, topLate, risky, pendingReview: await count('punches', { review: 'pending' }), pendingCorr: await count('corrections', { state: 'pending' }), pendingLeave: await count('leaves', { state: 'pending' }), unseenAlerts: await count('alerts', { seen: 0, ts: { $gte: Date.now() - 7 * 86400000 } }) };
   });
 
   app.get('/audit', { preHandler: guard('audit.read') }, async (req) =>
@@ -397,6 +421,7 @@ export async function buildApp({ mongoUri, dbName = 'geowork', secret = 'dev-sec
 
   registerExtras(app, { db, auth, guard, visible, seen, audit, tzOf, dayKey, nameMap });
   registerExtras2(app, { db, guard, visible, seen, tzOf, dayKey, nameMap });
+  registerDuty(app, { db, guard, visible, seen });
 
   await app.ready();
   return app;

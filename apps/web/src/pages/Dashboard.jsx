@@ -1,10 +1,45 @@
 import React, { useCallback, useState } from 'react';
-import { Users, UserCheck, UserX, Clock, CalendarOff, LogOut, Plus, MapPinPlus, BellRing, Hourglass, CalendarClock, Radio } from 'lucide-react';
+import { Users, UserCheck, UserX, Clock, CalendarOff, LogOut, Plus, MapPinPlus, BellRing, Hourglass, CalendarClock, Radio, ShieldAlert, Check } from 'lucide-react';
 import { Avatar, Donut, Empty, Pill, TrendChart, fmtHours, usePoll } from '../ui.jsx';
 
 const greet = () => { const h = new Date().getHours(); return h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening'; };
 const pct = (n, t) => (t ? Math.round((n / t) * 100) : 0);
 const toneColor = { ok: 'var(--ok)', warn: 'var(--warn)', bad: 'var(--bad)', info: 'var(--info)' };
+
+const ago = (iso) => {
+  const m = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+  return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.floor(m / 60)} h ago` : new Date(iso).toLocaleDateString([], { day: 'numeric', month: 'short' });
+};
+const dutyTone = { warn: ['var(--warn-soft)', 'var(--warn)'], bad: ['var(--bad-soft)', 'var(--bad)'], info: ['var(--info-soft)', 'var(--info)'] };
+
+function DutyAlerts({ api, can }) {
+  const [a, setA] = useState(null);
+  const [failed, setFailed] = useState(false);
+  const load = useCallback(() => api.get('/alerts').then((r) => { setA(r); setFailed(false); }).catch(() => setFailed(true)), [api]);
+  usePoll(load, 12000);
+  const markAll = () => api.post('/alerts/seen', {}).then(load).catch(() => {});
+  return (
+    <div className="card">
+      <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <ShieldAlert size={17} />On-duty alerts
+        {a?.unseen > 0 && <span className="pill p-warn" style={{ marginLeft: 4 }}>{a.unseen} new</span>}
+        <span style={{ flex: 1 }} />
+        {a?.unseen > 0 && can('approve.write') && <button className="btn soft sm" onClick={markAll}><Check size={14} />Mark all seen</button>}
+      </h3>
+      {failed && !a ? <Empty text="Could not load alerts." /> : !a ? <div className="muted">Loading...</div> : a.items.length === 0
+        ? <Empty text="No one has left the work area during a shift." />
+        : a.items.slice(0, 6).map((x) => {
+          const [bg, fg] = dutyTone[x.tone] ?? dutyTone.info;
+          return (
+            <div className="alert-i" key={x.id} style={{ opacity: x.seen ? 0.6 : 1 }}>
+              <div className="ico" style={{ background: bg, color: fg }}><ShieldAlert size={18} /></div>
+              <div><b style={{ fontWeight: x.seen ? 600 : 700 }}>{x.text}</b><div className="muted" style={{ fontSize: 12 }}>{ago(x.at)}</div></div>
+            </div>
+          );
+        })}
+    </div>
+  );
+}
 
 export default function Dashboard({ api, me, go, can }) {
   const [d, setD] = useState(null);
@@ -87,6 +122,7 @@ export default function Dashboard({ api, me, go, can }) {
           {d.trend.length === 0 ? <Empty text="No attendance history yet." /> : <TrendChart data={d.trend} />}
         </div>
         <div>
+          <DutyAlerts api={api} can={can} />
           <div className="card">
             <h3>Alerts &amp; actions</h3>
             <div className="alert-i"><div className="ico" style={{ background: 'var(--violet-soft)', color: 'var(--violet)' }}><CalendarOff size={18} /></div>

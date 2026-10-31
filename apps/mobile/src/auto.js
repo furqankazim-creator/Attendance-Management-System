@@ -51,6 +51,18 @@ export function regionFor(site) {
   return { identifier: `site-${site.id}`, latitude: lat, longitude: lng, radius: Math.max(Math.ceil(r) + 30, 100), notifyOnEnter: true, notifyOnExit: true };
 }
 
+export const REASONS = {
+  expo_go: 'Automatic attendance needs the installed GeoWork app. It cannot run inside Expo Go.',
+  no_site: 'No work location is assigned to you yet.',
+  site_off: 'Automatic attendance is turned off for your work location. Ask your admin.',
+  denied: 'Location permission was not allowed.',
+  need_always: 'Choose "Allow all the time" for location, so the phone can notice you arriving while the app is closed.',
+};
+
+// The first-login offer is shown once per employee on this phone.
+export const askedBefore = async (userId) => (await AsyncStorage.getItem(`auto_asked_${userId}`)) === '1';
+export const markAsked = (userId) => AsyncStorage.setItem(`auto_asked_${userId}`, '1');
+
 export async function autoWanted() { return (await AsyncStorage.getItem(PREF)) === '1'; }
 
 /** Asks for the permissions and starts watching the site. Returns { ok, reason }. */

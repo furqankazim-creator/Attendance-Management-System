@@ -3,6 +3,7 @@ import { Pressable, RefreshControl, ScrollView, Text, View } from 'react-native'
 import { C, DOW, F, MONTHS, addDays, clock, hm, localToday, mondayOf, parseDay, prettyDay } from '../theme';
 import { Card, Chip, Header, Icon, IconBtn, s } from '../ui';
 import { call } from '../api';
+import { useLive } from '../useLive';
 
 const EV = {
   check_in: ['log-in-outline', C.ok, 'Check In'], check_out: ['log-out-outline', C.bad, 'Check Out'],
@@ -18,15 +19,17 @@ export default function History({ token, site }) {
   const [busy, setBusy] = useState(false);
 
   const ym = sel.slice(0, 7);
-  const load = useCallback(async () => {
-    setBusy(true);
+  const load = useCallback(async (opts) => {
+    const quiet = opts?.silent === true;
+    if (!quiet) setBusy(true);
     try {
       setMonth(await call('GET', `/me/history?month=${ym}`, token));
       setDay(await call('GET', `/me/day?day=${sel}`, token));
     } catch {}
-    setBusy(false);
+    if (!quiet) setBusy(false);
   }, [ym, sel, token]);
   useEffect(() => { load(); }, [load]);
+  useLive(() => load({ silent: true }), 30000);
 
   const monday = mondayOf(sel);
   const week = Array.from({ length: 7 }, (_, i) => addDays(monday, i));

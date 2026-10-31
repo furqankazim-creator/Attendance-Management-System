@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Linking, Pressable, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { C, F, GRAD, clock, msg, shadowOf } from '../theme';
 import { Btn, Icon, Sheet } from '../ui';
 import { call, flushQueue, queueSize } from '../api';
 import { doPunch } from '../punch';
-import { syncAuto } from '../auto';
+import { REASONS, askedBefore, autoWanted, enableAuto, inExpoGo, markAsked, syncAuto } from '../auto';
+import { useLive } from '../useLive';
 import Home from './Home';
 import History from './History';
 import Reports from './Reports';
@@ -21,20 +22,41 @@ export default function Worker({ token, user, onLogout }) {
   const [refreshing, setRefreshing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
+  const [alerts, setAlerts] = useState({ items: [], unseen: 0 });
+  const [showAlerts, setShowAlerts] = useState(false);
+  const [offerAuto, setOfferAuto] = useState(false);
 
-  const refresh = useCallback(async () => {
-    setRefreshing(true);
+  // refresh({ silent: true }) is the background update: no pull-to-refresh spinner.
+  const refresh = useCallback(async (opts) => {
+    const quiet = opts?.silent === true;
+    if (!quiet) setRefreshing(true);
     try {
       await flushQueue(token);
       const profile = await call('GET', '/me', token);
       setMe(profile);
       syncAuto(profile.site).catch(() => {});
       setToday(await call('GET', '/me/today', token));
+      setAlerts(await call('GET', '/me/alerts', token).catch(() => ({ items: [], unseen: 0 })));
     } catch {}
     setPending(await queueSize());
-    setRefreshing(false);
+    if (!quiet) setRefreshing(false);
   }, [token]);
-  useEffect(() => { refresh(); const i = setInterval(refresh, 60000); return () => clearInterval(i); }, [refresh]);
+  useLive(() => refresh({ silent: true }), 15000);
+
+  // First login: offer automatic attendance once, if this phone and this work location can do it.
+  useEffect(() => {
+    const site = me?.site;
+    if (!site || site.auto_attendance === 0 || inExpoGo) return;
+    (async () => { if (!(await askedBefore(user.id)) && !(await autoWanted())) setOfferAuto(true); })();
+  }, [me?.site?.id]);
+  const answerOffer = async (yes) => {
+    setOfferAuto(false);
+    await markAsked(user.id);
+    if (!yes) return;
+    const r = await enableAuto(me.site);
+    if (r.ok) setResult({ ok: true, icon: 'navigate-circle-outline', title: 'Automatic attendance is on', text: 'You will be checked in when you arrive at work and out when you leave. You can switch it off in Profile.' });
+    else Alert.alert('Automatic attendance', REASONS[r.reason] ?? 'Could not turn it on.', r.reason === 'need_always' ? [{ text: 'Open settings', onPress: () => Linking.openSettings() }, { text: 'Later' }] : undefined);
+  };
 
   const checkedIn = !!today?.checked_in;
   const punch = async () => {
@@ -50,7 +72,11 @@ export default function Worker({ token, user, onLogout }) {
     setBusy(false);
   };
 
-  const props = { token, user, me, today, pending, refresh, refreshing, goTab: setTab, site: me?.site, onLogout };
+  const openAlerts = () => {
+    setShowAlerts(true);
+    if (alerts.unseen) call('POST', '/me/alerts/seen', token, {}).then(() => setAlerts((a) => ({ ...a, unseen: 0 }))).catch(() => {});
+  };
+  const props = { token, user, me, today, pending, alerts, openAlerts, refresh, refreshing, goTab: setTab, site: me?.site, onLogout };
   return (
     <View style={{ flex: 1 }}>
       <View style={{ flex: 1 }}>
@@ -77,6 +103,44 @@ export default function Worker({ token, user, onLogout }) {
           <Text style={{ textAlign: 'center', fontFamily: F.b, fontSize: 11, color: checkedIn ? C.bad : C.ok, position: 'absolute', bottom: 0, alignSelf: 'center' }}>{checkedIn ? 'Check out' : 'Punch'}</Text>
         </Pressable>
       </View>
+
+      <Sheet visible={offerAuto} onClose={() => answerOffer(false)}>
+        <View style={{ alignItems: 'center' }}>
+          <View style={{ width: 84, height: 84, borderRadius: 42, backgroundColor: C.okSoft, alignItems: 'center', justifyContent: 'center', marginBottom: 14 }}>
+            <Icon name="navigate-circle-outline" size={44} color={C.ok} />
+          </View>
+          <Text style={{ fontFamily: F.xb, fontSize: 21, textAlign: 'center' }}>Check in automatically?</Text>
+          <Text style={{ fontFamily: F.m, fontSize: 14.5, color: C.mute, textAlign: 'center', marginTop: 8 }}>
+            When you arrive at {me?.site?.name ?? 'work'} you are checked in, and when you leave you are checked out, without tapping Punch.
+          </Text>
+          <Text style={{ fontFamily: F.m, fontSize: 12.5, color: C.mute, textAlign: 'center', marginTop: 8, marginBottom: 14 }}>
+            Your phone only tells the app when you cross the edge of the work area. No route is recorded. Choose "Allow all the time" for location when asked.
+          </Text>
+          <Btn title="Turn on" onPress={() => answerOffer(true)} color={C.ok} style={{ alignSelf: 'stretch' }} />
+          <Pressable onPress={() => answerOffer(false)} hitSlop={10} style={{ paddingVertical: 12 }}><Text style={{ fontFamily: F.sb, color: C.mute }}>Not now</Text></Pressable>
+        </View>
+      </Sheet>
+
+      <Sheet visible={showAlerts} onClose={() => setShowAlerts(false)}>
+        <Text style={{ fontFamily: F.xb, fontSize: 20, marginBottom: 10 }}>Notifications</Text>
+        {pending > 0 && (
+          <View style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 10 }}>
+            <Icon name="cloud-offline-outline" size={20} color={C.warn} />
+            <Text style={{ fontFamily: F.m, fontSize: 13.5, marginLeft: 10, flex: 1 }}>{pending} punch{pending > 1 ? 'es are' : ' is'} waiting for internet and will sync automatically.</Text>
+          </View>
+        )}
+        {alerts.items.length === 0 && pending === 0 && <Text style={{ fontFamily: F.m, color: C.mute, textAlign: 'center', paddingVertical: 24 }}>Nothing new. You will see reminders here, for example if you are outside the work area during your shift.</Text>}
+        {alerts.items.slice(0, 8).map((a) => (
+          <View key={a.id} style={{ flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 10, borderTopWidth: 1, borderColor: C.line }}>
+            <Icon name={a.type === 'auto_closed' ? 'time-outline' : 'walk-outline'} size={20} color={a.tone === 'bad' ? C.bad : C.warn} />
+            <View style={{ flex: 1, marginLeft: 10 }}>
+              <Text style={{ fontFamily: F.sb, fontSize: 13.5 }}>{a.text}</Text>
+              <Text style={{ fontFamily: F.m, fontSize: 11.5, color: C.mute, marginTop: 2 }}>{new Date(a.at).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</Text>
+            </View>
+          </View>
+        ))}
+        <Btn title="Close" onPress={() => setShowAlerts(false)} color={C.primary} style={{ alignSelf: 'stretch', marginTop: 12 }} />
+      </Sheet>
 
       <Sheet visible={!!result} onClose={() => setResult(null)}>
         {result && (

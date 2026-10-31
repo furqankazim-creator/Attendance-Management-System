@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
-import { Plus, MapPin, Search, Pencil, Trash2, Tablet, Copy, ExternalLink } from 'lucide-react';
-import { Empty, Modal, errText } from '../ui.jsx';
+import { Plus, MapPin, Search, Pencil, Trash2, Tablet, Copy, ExternalLink, ShieldAlert } from 'lucide-react';
+import { Empty, Modal, errText, usePoll } from '../ui.jsx';
 import { BASE } from '../api.js';
 
 const PRESETS = [50, 100, 150, 200, 300];
@@ -106,7 +106,7 @@ function Kiosks({ api, toast, sites }) {
   const [list, setList] = useState([]);
   const [f, setF] = useState({ name: '', site_id: '' });
   const load = () => api.get('/kiosks').then(setList);
-  useEffect(() => { load(); }, []);
+  usePoll(load, 20000);
   const link = (k) => `${location.origin}${location.pathname}#/kiosk?token=${k.token}`;
   const add = async () => { try { await api.post('/kiosks', { name: f.name, site_id: Number(f.site_id) }); setF({ name: '', site_id: '' }); toast('Kiosk created'); load(); } catch (x) { toast(errText(x)); } };
   return (
@@ -131,18 +131,52 @@ function Kiosks({ api, toast, sites }) {
   );
 }
 
+const DUTY = { auto_close: 1, auto_close_after_min: 60, away_alert_min: 20 };
+
+function DutyModal({ site, onClose, onSave }) {
+  const cur = { ...DUTY, ...Object.fromEntries(Object.entries(site).filter(([k, v]) => k in DUTY && v != null)) };
+  const [close, setClose] = useState(!!cur.auto_close);
+  const [after, setAfter] = useState(cur.auto_close_after_min);
+  const [away, setAway] = useState(cur.away_alert_min);
+  const ok = Number.isInteger(Number(after)) && after !== '' && Number(after) >= 0 && Number(after) <= 480 && Number.isInteger(Number(away)) && away !== '' && Number(away) >= 5 && Number(away) <= 240;
+  return (
+    <Modal title={`Duty rules - ${site.name}`} onClose={onClose}>
+      <p className="muted" style={{ marginBottom: 14 }}>What the system does when employees at this location leave the work area or forget to check out.</p>
+      <label style={{ display: 'flex', gap: 10, alignItems: 'flex-start', cursor: 'pointer', textTransform: 'none', letterSpacing: 0, fontSize: 13, fontWeight: 500 }}>
+        <input type="checkbox" checked={close} onChange={(e) => setClose(e.target.checked)} style={{ width: 'auto', marginTop: 3 }} />
+        <span><b style={{ fontWeight: 700 }}>Close the day automatically</b><br /><span className="muted">If someone is still checked in after their shift ends, check them out at shift end and notify you and the employee.</span></span>
+      </label>
+      <label className="f">Wait this many minutes after shift end first (0 - 480)
+        <input type="number" min="0" max="480" value={after} disabled={!close} onChange={(e) => setAfter(e.target.value)} />
+      </label>
+      <label className="f">Alert me when an employee has been outside the area for (minutes, 5 - 240)
+        <input type="number" min="5" max="240" value={away} onChange={(e) => setAway(e.target.value)} />
+      </label>
+      <p className="muted" style={{ marginTop: 10 }}>The away alert applies to employees who left the area during their shift: automatic exits and check-outs made from outside the area.</p>
+      <div className="row" style={{ marginTop: 20 }}>
+        <button className="btn soft" style={{ flex: 1, justifyContent: 'center' }} onClick={onClose}>Cancel</button>
+        <button className="btn primary" style={{ flex: 1, justifyContent: 'center' }} disabled={!ok} onClick={() => onSave({ auto_close: close, auto_close_after_min: Number(after), away_alert_min: Number(away) })}>Save rules</button>
+      </div>
+    </Modal>
+  );
+}
+
 export default function Locations({ api, toast, params }) {
   const [sites, setSites] = useState([]);
   const [workers, setWorkers] = useState([]);
   const [modal, setModal] = useState(params?.add ? { mode: 'add' } : null);
+  const [duty, setDuty] = useState(null);
   const load = () => { api.get('/sites').then(setSites); api.get('/workers').then(setWorkers).catch(() => {}); };
-  useEffect(() => { load(); }, []);
+  usePoll(load, 15000);
   const save = async (body) => {
     try {
       if (modal.mode === 'edit') await api.patch(`/sites/${modal.site.id}`, { name: body.name, radius_m: body.radius_m, lat: body.lat, lng: body.lng, auto_attendance: body.auto_attendance });
       else await api.post('/sites', body);
       toast('Location saved'); setModal(null); load();
     } catch (x) { toast(errText(x)); }
+  };
+  const saveDuty = async (body) => {
+    try { await api.patch(`/sites/${duty.id}`, body); toast('Duty rules saved'); setDuty(null); load(); } catch (x) { toast(errText(x)); }
   };
   const remove = async (s) => { if (!confirm(`Delete "${s.name}"? Employees on it will be unassigned.`)) return; await api.del(`/sites/${s.id}`); toast('Location deleted'); load(); };
   return (
@@ -157,13 +191,16 @@ export default function Locations({ api, toast, params }) {
           <div key={s.id} className="site-card" style={{ background: 'var(--card)', boxShadow: 'var(--shadow)' }}>
             <div className="ico"><MapPin size={22} /></div>
             <div style={{ flex: 1, minWidth: 0 }}><b>{s.name}</b>
-              <div className="muted">{s.type === 'circle' ? `${s.radius_m} m radius` : `${s.points.length}-corner polygon`} · {workers.filter((w) => w.site_id === s.id).length} employees · auto attendance {s.auto_attendance === 0 ? 'off' : 'on'}</div></div>
+              <div className="muted">{s.type === 'circle' ? `${s.radius_m} m radius` : `${s.points.length}-corner polygon`} · {workers.filter((w) => w.site_id === s.id).length} employees · auto attendance {s.auto_attendance === 0 ? 'off' : 'on'}</div>
+              <div className="muted">{s.auto_close === 0 ? 'Auto close off' : `Auto close ${s.auto_close_after_min ?? 60} min after shift`} · away alert {s.away_alert_min ?? 20} min</div></div>
+            <button className="btn soft sm" title="Duty rules" onClick={() => setDuty(s)}><ShieldAlert size={14} /></button>
             {s.type === 'circle' && <button className="btn soft sm" onClick={() => setModal({ mode: 'edit', site: s })}><Pencil size={14} /></button>}
             <button className="btn danger sm" onClick={() => remove(s)}><Trash2 size={14} /></button>
           </div>
         ))}
       </div>
       <Kiosks api={api} toast={toast} sites={sites} />
+      {duty && <DutyModal site={duty} onClose={() => setDuty(null)} onSave={saveDuty} />}
       {modal && <LocationModal initial={modal.site} onClose={() => setModal(null)} onSave={save} />}
     </>
   );

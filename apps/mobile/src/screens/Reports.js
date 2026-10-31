@@ -3,6 +3,7 @@ import { Alert, Pressable, ScrollView, Text, TextInput, View } from 'react-nativ
 import { C, F, addDays, hm, localToday, mondayOf, msg, parseDay } from '../theme';
 import { Btn, Card, Chip, Empty, Header, Icon, s } from '../ui';
 import { call } from '../api';
+import { useLive } from '../useLive';
 
 const field = { backgroundColor: C.bg, borderRadius: 12, padding: 13, fontFamily: F.m, fontSize: 14.5, color: C.ink, marginBottom: 10 };
 
@@ -21,8 +22,9 @@ function Seg({ items, value, onChange }) {
 function Timesheet({ token }) {
   const [start, setStart] = useState(mondayOf(localToday()));
   const [data, setData] = useState(null);
-  const load = useCallback(async () => { try { setData(await call('GET', `/timesheets/week?start=${start}`, token)); } catch { setData(null); } }, [start, token]);
+  const load = useCallback(async (opts) => { try { setData(await call('GET', `/timesheets/week?start=${start}`, token)); } catch { if (opts?.silent !== true) setData(null); } }, [start, token]);
   useEffect(() => { load(); }, [load]);
+  useLive(() => load({ silent: true }), 30000);
   const submit = async () => {
     try { await call('POST', '/timesheets/submit', token, { week_start: start }); Alert.alert('Submitted', 'Your supervisor will review this week.'); load(); }
     catch (e) { Alert.alert('Could not submit', msg(e)); }
@@ -66,6 +68,7 @@ function Requests({ token }) {
   const [corr, setCorr] = useState({ day: '', kind: 'out', requested_time: '', reason: '' });
   const load = useCallback(async () => { try { setList(await call('GET', mode === 'Leave' ? '/leaves' : '/corrections', token)); } catch {} }, [mode, token]);
   useEffect(() => { load(); }, [load]);
+  useLive(load, 30000);
   const send = async () => {
     try {
       if (mode === 'Leave') { await call('POST', '/leaves', token, leave); setLeave({ from_day: '', to_day: '', type: 'casual', reason: '' }); }

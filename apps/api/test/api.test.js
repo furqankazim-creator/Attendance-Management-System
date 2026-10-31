@@ -70,3 +70,28 @@ test('correction workflow', async () => {
   const d = await call('POST', `/corrections/${c.body.id}/decision`, { decision: 'approved' }, admin);
   assert.equal(d.code, 200);
 });
+
+test('check-out from outside the fence is accepted but goes to review', async () => {
+  const { call, worker } = await setup();
+  assert.equal((await call('POST', '/punch', { kind: 'in', ...inside }, worker)).code, 200);
+  const r = await call('POST', '/punch', { kind: 'out', lat: 25.5, lng: 67.5, accuracy: 8, device_id: 'dev1' }, worker);
+  assert.equal(r.code, 200);
+  assert.equal(r.body.review, 'pending');
+  assert.ok(r.body.risk.reasons.includes('outside_area_checkout'));
+});
+test('check-in from outside is still refused after the check-out change', async () => {
+  const { call, worker } = await setup();
+  assert.equal((await call('POST', '/punch', { kind: 'out', lat: 25.5, lng: 67.5, accuracy: 8, device_id: 'dev1' }, worker)).code, 409); // not checked in
+});
+test('login is throttled after repeated wrong passwords', async () => {
+  const { call } = await setup();
+  for (let i = 0; i < 8; i++) assert.equal((await call('POST', '/auth/login', { email: 'ali@x.com', password: 'bad' })).code, 401);
+  assert.equal((await call('POST', '/auth/login', { email: 'ali@x.com', password: 'bad' })).code, 429);
+  assert.equal((await call('POST', '/auth/login', { email: 'ali@x.com', password: 'pw' })).code, 429);
+});
+test('tokens carry an expiry', async () => {
+  const { call } = await setup();
+  const r = await call('POST', '/auth/login', { email: 'ali@x.com', password: 'pw' });
+  const payload = JSON.parse(Buffer.from(r.body.token.split('.')[1], 'base64url').toString());
+  assert.ok(payload.exp > payload.iat);
+});

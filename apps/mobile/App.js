@@ -7,6 +7,7 @@ import {
   Poppins_700Bold, Poppins_800ExtraBold,
 } from '@expo-google-fonts/poppins';
 import './src/auto';
+import { onUnauthorized } from './src/api';
 import { C } from './src/theme';
 import Login from './src/screens/Login';
 import Worker from './src/screens/Worker';
@@ -50,6 +51,7 @@ function Main() {
     setSession(sess);
   };
   const logout = async () => { await AsyncStorage.removeItem('session'); setSession(null); };
+  useEffect(() => { onUnauthorized(logout); }, []);
 
   if (!fontsReady || !ready) return <View style={{ flex: 1, backgroundColor: C.bg, justifyContent: 'center' }}><ActivityIndicator size="large" color={C.primary} /></View>;
   return (

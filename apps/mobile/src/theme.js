@@ -44,6 +44,8 @@ export const MESSAGES = {
   not_checked_in: 'You are not checked in.',
   no_site_assigned: 'No work site assigned yet. Ask your admin.',
   bad_credentials: 'Wrong email or password.',
+  too_many_attempts: 'Too many wrong attempts. Wait 15 minutes and try again.',
+  unauthorized: 'Your session expired. Please sign in again.',
   account_disabled: 'This account is disabled.',
   bad_dates: 'Check the dates (the end must not be before the start).',
   break_already_open: 'A break is already running.',

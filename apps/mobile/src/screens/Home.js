@@ -33,7 +33,7 @@ function Tile({ icon, color, bg, label, value, onPress, active }) {
   );
 }
 
-export default function Home({ token, user, me, today: t, pending, refresh, refreshing, goTab }) {
+export default function Home({ token, user, me, today: t, pending, alerts, openAlerts, refresh, refreshing, goTab }) {
   const [now, setNow] = useState(Date.now());
   useEffect(() => { const i = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(i); }, []);
   const pos = useNearby(!!me?.site);
@@ -70,7 +70,7 @@ export default function Home({ token, user, me, today: t, pending, refresh, refr
   const today = localToday();
   return (
     <ScrollView refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />} contentContainerStyle={{ paddingBottom: 130 }} showsVerticalScrollIndicator={false}>
-      <Header tall title={`${greet()}, ${user.name.split(' ')[0]}!`} subtitle="Have a productive day ahead." right={<IconBtn name="notifications-outline" badge={pending} onPress={() => goTab('reports')} />} />
+      <Header tall title={`${greet()}, ${user.name.split(' ')[0]}!`} subtitle="Have a productive day ahead." right={<IconBtn name="notifications-outline" badge={pending + (alerts?.unseen ?? 0)} onPress={openAlerts} />} />
       <View style={{ paddingHorizontal: 16, marginTop: -58 }}>
         <Card style={{ paddingVertical: 18 }}>
           <Text style={{ fontFamily: F.b, fontSize: 15, color: C.ink }}>Today's Status</Text>

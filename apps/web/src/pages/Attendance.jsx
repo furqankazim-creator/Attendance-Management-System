@@ -100,6 +100,7 @@ function EmployeeLog({ api, token }) {
   const [q, setQ] = useState('');
   const query = `?from=${from}&to=${to}`;
   useEffect(() => { api.get(`/reports/attendance${query}`).then(setRows); }, [query]);
+  usePoll(() => api.get(`/reports/attendance${query}`).then(setRows), 30000, false);
   const shown = rows.filter((r) => r.worker.toLowerCase().includes(q.toLowerCase()));
   const csv = async () => {
     const res = await fetch(`${BASE}/reports/attendance${query}&format=csv`, { headers: { authorization: `Bearer ${token}` } });
@@ -130,7 +131,7 @@ function DutyRoster({ api, toast, can }) {
   const [sites, setSites] = useState([]);
   const w8 = can('workers.write');
   const load = () => { api.get('/workers').then(setRows); api.get('/sites').then(setSites); };
-  useEffect(() => { load(); }, []);
+  usePoll(load, 15000);
   const patch = (id, b) => api.patch(`/workers/${id}`, b).then(() => { toast('Roster updated'); load(); });
   const site = (id) => sites.find((s) => s.id === id)?.name ?? 'Unassigned';
   return (

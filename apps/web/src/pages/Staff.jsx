@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Plus, Crown, UserCog, Shield, Eye, HardHat } from 'lucide-react';
-import { Avatar, Empty, Modal, Pill, errText } from '../ui.jsx';
+import { Avatar, Empty, Modal, Pill, errText, usePoll } from '../ui.jsx';
 
 const ROLE_INFO = {
   owner: ['Owner', 'Full control, including staff accounts.', Crown, '#f59e0b'],
@@ -16,7 +16,7 @@ export default function Staff({ api, toast }) {
   const [open, setOpen] = useState(false);
   const [f, setF] = useState({ name: '', email: '', password: '', role: 'hr', site_id: '' });
   const load = () => { api.get('/staff').then(setStaff); api.get('/sites').then(setSites); };
-  useEffect(() => { load(); }, []);
+  usePoll(load, 20000);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const add = async () => {
     try { await api.post('/staff', { ...f, site_id: f.site_id ? Number(f.site_id) : null }); setOpen(false); setF({ name: '', email: '', password: '', role: 'hr', site_id: '' }); toast('Staff account created'); load(); }

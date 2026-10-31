@@ -3,6 +3,7 @@ import { Alert, Pressable, RefreshControl, ScrollView, Text, View } from 'react-
 import { C, F, hm, msg, shadowOf } from '../theme';
 import { Avatar, Btn, Card, Chip, Empty, Header, Icon, IconBtn, Ring, s } from '../ui';
 import { call } from '../api';
+import { useLive } from '../useLive';
 
 const TABS = [['dash', 'Dashboard', 'grid'], ['team', 'Team', 'people'], ['approve', 'Approvals', 'checkmark-done'], ['me', 'Profile', 'person']];
 const pct = (n, t) => (t ? Math.round((n / t) * 100) : 0);
@@ -16,22 +17,26 @@ export default function Staff({ token, user, onLogout }) {
   const [corr, setCorr] = useState([]);
   const [leaves, setLeaves] = useState([]);
   const [busy, setBusy] = useState(false);
+  const [alerts, setAlerts] = useState({ items: [], unseen: 0 });
   const canDecide = !!user.perms?.includes('approve.write');
 
-  const load = useCallback(async () => {
-    setBusy(true);
+  const load = useCallback(async (opts) => {
+    const quiet = opts?.silent === true;
+    if (!quiet) setBusy(true);
     try {
       setD(await call('GET', '/dashboard', token));
       setBoard(await call('GET', '/board', token));
+      setAlerts(await call('GET', '/alerts', token).catch(() => ({ items: [], unseen: 0 })));
       setReview(await call('GET', '/punches/review', token));
       setCorr((await call('GET', '/corrections', token)).filter((c) => c.state === 'pending'));
       setLeaves((await call('GET', '/leaves', token)).filter((c) => c.state === 'pending'));
-    } catch (e) { Alert.alert('Error', msg(e)); }
-    setBusy(false);
+    } catch (e) { if (!quiet) Alert.alert('Error', msg(e)); }
+    if (!quiet) setBusy(false);
   }, [token]);
-  useEffect(() => { load(); const i = setInterval(load, 20000); return () => clearInterval(i); }, [load]);
+  useLive(() => load({ silent: true }), 15000);
   const decide = async (path, decision) => { try { await call('POST', path, token, { decision }); load(); } catch (e) { Alert.alert('Error', msg(e)); } };
   const todo = review.length + corr.length + leaves.length;
+  const markSeen = async () => { try { await call('POST', '/alerts/seen', token, {}); setAlerts((a) => ({ ...a, unseen: 0, items: a.items.map((x) => ({ ...x, seen: true })) })); } catch (e) { Alert.alert('Error', msg(e)); } };
   const o = d?.overview;
 
   const Decide = ({ path }) => !canDecide ? null : (
@@ -45,10 +50,23 @@ export default function Staff({ token, user, onLogout }) {
     <View style={{ flex: 1 }}>
       <ScrollView refreshControl={<RefreshControl refreshing={busy} onRefresh={load} />} contentContainerStyle={{ paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
         <Header title={tab === 'dash' ? `Hi, ${user.name.split(' ')[0]}` : TABS.find((t) => t[0] === tab)[1]} subtitle={tab === 'dash' ? `${user.label ?? 'Staff'} dashboard` : undefined}
-          right={<IconBtn name="notifications-outline" badge={todo} onPress={() => setTab('approve')} />} />
+          right={<IconBtn name="notifications-outline" badge={todo + alerts.unseen} onPress={() => setTab(todo === 0 && alerts.unseen > 0 ? 'dash' : 'approve')} />} />
         <View style={{ paddingHorizontal: 16, marginTop: 16 }}>
           {tab === 'dash' && (!o ? <Empty text="Loading..." /> : (
             <>
+              <Card>
+                <View style={[s.row, { justifyContent: 'space-between', marginBottom: 6 }]}>
+                  <View style={s.row}><Icon name="shield-checkmark-outline" size={18} color={C.warn} /><Text style={{ fontFamily: F.b, fontSize: 15, marginLeft: 8 }}>On-duty alerts{alerts.unseen ? ` (${alerts.unseen} new)` : ''}</Text></View>
+                  {alerts.unseen > 0 && canDecide ? <Pressable onPress={markSeen} hitSlop={8}><Text style={{ fontFamily: F.sb, fontSize: 12.5, color: C.primary }}>Mark all seen</Text></Pressable> : null}
+                </View>
+                {alerts.items.length === 0 ? <Empty text="No one has left the work area during a shift." /> : alerts.items.slice(0, 6).map((a, i) => (
+                  <View key={a.id} style={[s.row, { paddingVertical: 9, borderTopWidth: i ? 1 : 0, borderColor: C.line, alignItems: 'flex-start', opacity: a.seen ? 0.6 : 1 }]}>
+                    <View style={{ width: 9, height: 9, borderRadius: 5, backgroundColor: TONE[a.tone] ?? C.info, marginTop: 6, marginRight: 10 }} />
+                    <View style={{ flex: 1 }}><Text style={{ fontFamily: a.seen ? F.m : F.sb, fontSize: 13.5 }}>{a.text}</Text>
+                      <Text style={{ fontFamily: F.m, fontSize: 11.5, color: C.mute }}>{new Date(a.at).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</Text></View>
+                  </View>
+                ))}
+              </Card>
               <Card>
                 <Text style={{ fontFamily: F.b, fontSize: 15, marginBottom: 8 }}>Today's overview</Text>
                 <View style={[s.row, { justifyContent: 'space-around' }]}>

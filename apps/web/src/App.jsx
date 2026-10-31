@@ -39,6 +39,9 @@ function AdminApp() {
   const [theme, setTheme] = useState(() => get('theme') ?? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
   const [msg, setMsg] = useState('');
   const [pending, setPending] = useState(0);
+  const [unseen, setUnseen] = useState(0);
+  const [synced, setSynced] = useState(null);
+  useEffect(() => { const f = () => setSynced(new Date()); addEventListener('geowork:synced', f); return () => removeEventListener('geowork:synced', f); }, []);
   const [search, setSearch] = useState('');
   const api = useMemo(() => makeApi(token), [token]);
 
@@ -56,7 +59,7 @@ function AdminApp() {
 
   useEffect(() => {
     if (!token || !can('board.read')) return;
-    const f = () => api.get('/stats').then((s) => setPending(s.pendingReview + s.pendingCorr + s.pendingLeave)).catch((e) => { if (e.message === 'unauthorized') signIn(null); });
+    const f = () => api.get('/stats').then((s) => { setPending(s.pendingReview + s.pendingCorr + s.pendingLeave); setUnseen(s.unseenAlerts ?? 0); }).catch((e) => { if (e.message === 'unauthorized') signIn(null); });
     f(); const t = setInterval(f, 15000); return () => clearInterval(t);
   }, [token, me, route]);
 
@@ -92,8 +95,9 @@ function AdminApp() {
         <header className="topbar">
           <div className="search"><Search size={16} /><input placeholder="Search employees, press Enter" value={search} onChange={(e) => setSearch(e.target.value)} onKeyDown={onSearch} /></div>
           <div className="sp" />
+          {synced && <span className="muted" title="Data on this page refreshes automatically" style={{ fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 6 }}><i style={{ width: 8, height: 8, borderRadius: 4, background: 'var(--ok)', display: 'inline-block' }} />Live &middot; {synced.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>}
           {me.role === 'auditor' && <span className="pill p-violet">Read-only</span>}
-          <button className="icon-btn" title="Approvals" onClick={() => can('approve.read') && go('approvals')}><Bell size={18} />{pending > 0 && <span className="badge">{pending}</span>}</button>
+          <button className="icon-btn" title={unseen > 0 ? 'Approvals and on-duty alerts' : 'Approvals'} onClick={() => (pending === 0 && unseen > 0) || !can('approve.read') ? go('dashboard') : go('approvals')}><Bell size={18} />{pending + unseen > 0 && <span className="badge">{pending + unseen}</span>}</button>
           <button className="icon-btn" title="Toggle theme" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>{theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}</button>
           <button className="icon-btn" title="Sign out" onClick={() => signIn(null)}><LogOut size={18} /></button>
         </header>

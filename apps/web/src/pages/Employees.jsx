@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Plus, Search, KeyRound, Smartphone, Pencil, Power } from 'lucide-react';
-import { Avatar, Empty, Modal, Pill, errText } from '../ui.jsx';
+import { Avatar, Empty, Modal, Pill, errText, usePoll } from '../ui.jsx';
 
 const blank = { name: '', email: '', password: '', department: 'General', site_id: '', shift_start: '09:00', shift_end: '18:00', grace_min: 10 };
 
@@ -44,7 +44,7 @@ export default function Employees({ api, toast, can, params, go }) {
   const [cred, setCred] = useState(null);
   const w8 = can('workers.write');
   const load = () => { api.get('/workers').then(setRows); api.get('/sites').then(setSites); };
-  useEffect(() => { load(); }, []);
+  usePoll(load, 15000);
   const depts = useMemo(() => [...new Set(rows.map((r) => r.department))], [rows]);
   const siteName = (id) => sites.find((s) => s.id === id)?.name ?? 'Unassigned';
   const shown = rows.filter((r) => (dept === 'all' || r.department === dept) && (r.name + r.email + r.id).toLowerCase().includes(q.toLowerCase()));

@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Alert, Linking, ScrollView, Switch, Text, View } from 'react-native';
 import { C, F } from '../theme';
 import { Avatar, Btn, Card, Header, Icon, s } from '../ui';
-import { disableAuto, enableAuto, inExpoGo, isWatching } from '../auto';
+import { REASONS, disableAuto, enableAuto, inExpoGo, isWatching } from '../auto';
 
 const Row = ({ icon, label, value }) => (
   <View style={[s.row, { paddingVertical: 11, borderBottomWidth: 1, borderColor: C.line }]}>
@@ -10,14 +10,6 @@ const Row = ({ icon, label, value }) => (
     <View style={{ marginLeft: 12, flex: 1 }}><Text style={{ fontFamily: F.m, fontSize: 12, color: C.mute }}>{label}</Text><Text style={{ fontFamily: F.sb, fontSize: 14.5 }}>{value}</Text></View>
   </View>
 );
-
-const REASONS = {
-  expo_go: 'Automatic attendance needs the installed GeoWork app. It cannot run inside Expo Go.',
-  no_site: 'No work location is assigned to you yet.',
-  site_off: 'Automatic attendance is turned off for your work location. Ask your admin.',
-  denied: 'Location permission was not allowed.',
-  need_always: 'Choose "Allow all the time" for location, so the phone can notice you arriving while the app is closed.',
-};
 
 export default function Profile({ user, me, onLogout }) {
   const [auto, setAuto] = useState(false);

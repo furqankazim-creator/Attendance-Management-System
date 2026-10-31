@@ -25,6 +25,9 @@ export async function deviceId() {
   return id;
 }
 
+let unauthorizedHandler = null;
+export const onUnauthorized = (fn) => { unauthorizedHandler = fn; };
+
 export async function call(method, path, token, body) {
   const res = await fetch(BASE + path, {
     method,
@@ -35,6 +38,7 @@ export async function call(method, path, token, body) {
   if (!res.ok) {
     const e = new Error(data.error ?? 'request_failed');
     e.status = res.status;
+    if (res.status === 401 && token) unauthorizedHandler?.(); // expired or revoked session: sign out
     throw e;
   }
   return data;

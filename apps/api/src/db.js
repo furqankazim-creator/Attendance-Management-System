@@ -13,6 +13,7 @@ const INDEXES = {
   timesheets: [[{ id: 1 }, { unique: true }], [{ user_id: 1, week_start: 1 }, { unique: true }]],
   kiosks: [[{ id: 1 }, { unique: true }], [{ token: 1 }, { unique: true }]],
   audit: [[{ id: 1 }, { unique: true }], [{ org_id: 1, id: -1 }]],
+  alerts: [[{ id: 1 }, { unique: true }], [{ org_id: 1, id: -1 }], [{ user_id: 1, to_worker: 1, id: -1 }], [{ key: 1 }]],
 };
 
 export async function openDb(uri, dbName = 'geowork') {

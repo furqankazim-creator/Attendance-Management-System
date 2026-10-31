@@ -98,7 +98,7 @@ export function registerExtras(app, { db, auth, guard, visible, seen, audit, tzO
   const newPin = () => String(crypto.randomInt(0, 10000)).padStart(4, '0');
   app.post('/workers/:id/pin', { preHandler: guard('workers.write') }, async (req, reply) => {
     const pin = newPin();
-    if (!(await db.update('users', { id: Number(req.params.id), org_id: req.user.org_id, role: 'worker' }, { pin_hash: bcrypt.hashSync(pin, 8) }))) return reply.code(404).send({ error: 'not_found' });
+    if (!(await db.update('users', { id: Number(req.params.id), org_id: req.user.org_id, role: 'worker' }, { pin_hash: bcrypt.hashSync(pin, 10) }))) return reply.code(404).send({ error: 'not_found' });
     await audit(req.user.org_id, req.user.id, 'pin_reset', { id: Number(req.params.id) });
     return { pin }; // shown once; only a hash is stored
   });

@@ -211,6 +211,8 @@ export function registerExtras2(app, { db, guard, visible, seen, tzOf, dayKey, n
       let text, tone = 'ok';
       if (p.kind === 'in' && p.status === 'late') { text = `${name} is late today`; tone = 'warn'; }
       else if (reasons.includes('unregistered_device')) { text = `${name} checked ${p.kind} from a different device`; tone = 'info'; }
+      else if (p.source === 'auto_close') { text = `${name} was checked out automatically at shift end`; tone = 'warn'; }
+      else if (reasons.includes('outside_area_checkout')) { text = `${name} checked out from outside the work area (needs review)`; tone = 'warn'; }
       else if (reasons.includes('mock_location')) { text = `${name} used a mock location`; tone = 'bad'; }
       else text = `${name} checked ${p.kind}${p.source === 'kiosk' ? ' at the kiosk' : p.source === 'auto' ? ' automatically' : ''}`;
       return { text, tone, at: new Date(p.server_ts).toISOString(), time };

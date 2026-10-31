@@ -6,7 +6,7 @@
 |---|---|---|
 | API + database | `cd apps\api` then `npm run dev` | http://localhost:3100 |
 | Admin panel | `cd apps\web` then `npm run dev` | http://localhost:5173 |
-| Mobile app | `cd apps\mobile` then `npx expo start -c` | scan the QR with **Expo Go**, or press `a` for an Android emulator |
+| Mobile app | `cd apps\mobile` then `npm run start:e` (Expo Go; picks the right Wi-Fi address) | scan the QR with **Expo Go**, or press `a` for an Android emulator |
 
 The API uses the MongoDB on this PC unless `apps\api\.env` has a `MONGODB_URI` (Atlas).
 A real phone must be on the same Wi-Fi as the PC. If it cannot connect, allow port 3100 in Windows Firewall.
@@ -72,6 +72,20 @@ Install the APK link from the build on the phone, then run `npm run start:e` and
 - **Audit log**: every change (who created, edited, approved) with time.
 - Employee phone changed? **Employees -> reset device** (key icon area), then they sign in on the new phone.
 - Employee left? Use the power icon to deactivate. History stays.
+
+## 4b. Leaving the work area, forgotten check-outs and alerts
+
+| Situation | What happens |
+|---|---|
+| Employee leaves the area (automatic attendance on) | Checked out automatically. If the shift is still running, an **on-duty alert** is raised: "Ali left Head Office at 14:10, 3 h 50 min before shift end". |
+| Employee taps **Check out from outside** the area | Accepted, but sent to **Approvals -> High-risk punches** for review, and an on-duty alert is raised. |
+| Away for longer than the site's limit (default 20 min) and not back | A second alert: "Ali has been away from Head Office for 25 min". The employee also gets a notification in the app (bell). Raised once per absence. |
+| Employee comes back | Info alert: "Ali is back at Head Office after 42 min away". |
+| Employee never checks out | After shift end plus the wait time (default 60 min) the day is **closed automatically at shift end**. Any open break is ended. You and the employee are told; if they worked later they send a time correction. |
+
+Where to see it: the **Dashboard -> On-duty alerts** card (and the bell badge), and on the mobile staff Dashboard. Employees see their own notifications under the bell on Home. **Mark all seen** clears the badge (owner, HR and supervisors).
+Change the rules per site: **Locations -> shield icon (Duty rules)** - turn auto close on/off, set the wait after shift end (0-480 min) and the away limit (5-240 min).
+The check runs on the API server once a minute, so the API must be running. Alerts for supervisors cover only their own site. Manual-mode employees who never open the app cannot be tracked while away: only the automatic geofence reports leaving.
 
 ## 5. Shared kiosk (front desk tablet)
 

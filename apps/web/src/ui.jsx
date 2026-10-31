@@ -9,8 +9,26 @@ export const ERR = {
 };
 export const errText = (e) => ERR[e.message] ?? e.message;
 
-export const usePoll = (fn, ms) => {
-  useEffect(() => { fn(); if (!ms) return; const t = setInterval(fn, ms); return () => clearInterval(t); }, []);
+// Live data: runs `fn` now (unless immediate is false), every `ms` while the tab is visible, and again when the tab regains focus.
+// `fn` is always the latest version (so it sees the current filters), runs never overlap, and failures are ignored until the next tick.
+export const usePoll = (fn, ms, immediate = true) => {
+  const latest = useRef(fn);
+  latest.current = fn;
+  useEffect(() => {
+    let busy = false;
+    const tick = async () => {
+      if (busy || document.hidden) return;
+      busy = true;
+      try { await latest.current(); window.dispatchEvent(new Event('geowork:synced')); } catch {}
+      busy = false;
+    };
+    if (immediate) tick();
+    const t = ms ? setInterval(tick, ms) : null;
+    const wake = () => { if (!document.hidden) tick(); };
+    document.addEventListener('visibilitychange', wake);
+    window.addEventListener('focus', wake);
+    return () => { if (t) clearInterval(t); document.removeEventListener('visibilitychange', wake); window.removeEventListener('focus', wake); };
+  }, [ms]);
 };
 
 export const fmtTime = (iso) => (iso ? new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--');
